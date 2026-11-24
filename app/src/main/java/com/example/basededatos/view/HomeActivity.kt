@@ -1,25 +1,41 @@
 package com.example.basededatos.view
 
 import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.text.format.DateFormat
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.PopupMenu
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.basededatos.databinding.ActivityHomeBinding
 import com.example.basededatos.databinding.DialogAddAssignmentBinding
 import com.example.basededatos.databinding.DialogAddSubjectBinding
 import com.example.basededatos.databinding.DialogDeleteAccountBinding
 import com.example.basededatos.network.AssignmentRecord
+import com.example.basededatos.network.AuthSessionStore
+import com.example.basededatos.network.GoogleAuthSession
 import com.example.basededatos.viewmodel.AppViewModelFactory
 import com.example.basededatos.viewmodel.BooksViewModel
+import com.example.basededatos.viewmodel.FavoriteBooksViewModel
 import com.example.basededatos.viewmodel.StudyViewModel
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
+import com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException
+import com.google.firebase.auth.FirebaseUser
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -27,10 +43,25 @@ import java.util.Locale
 
 class HomeActivity : AppCompatActivity() {
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted && ::binding.isInitialized) {
+            Snackbar.make(binding.root, "Activa las notificaciones si quieres recibir recordatorios.", Snackbar.LENGTH_LONG).show()
+        }
+    }
+
     private lateinit var binding: ActivityHomeBinding
     private lateinit var booksViewModel: BooksViewModel
+    private lateinit var favoriteBooksViewModel: FavoriteBooksViewModel
     private lateinit var studyViewModel: StudyViewModel
-    private val bookAdapter by lazy { BookAdapter(horizontalCards = true) }
+    private val bookAdapter by lazy {
+        BookAdapter(
+            horizontalCards = true,
+            onBookClick = ::openBookDetails,
+            onFavoriteClick = { favoriteBooksViewModel.toggleFavorite(email, it) }
+        )
+    }
     private val subjectAdapter by lazy { SubjectAdapter(::confirmRemoveSubject) }
     private val assignmentAdapter by lazy {
         AssignmentAdapter(
@@ -45,6 +76,7 @@ class HomeActivity : AppCompatActivity() {
     private var userName: String = ""
     private var university: String = ""
     private var email: String = ""
+    private var favoriteIds: Set<String> = emptySet()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,12 +90,16 @@ class HomeActivity : AppCompatActivity() {
 
         binding.tvBienvenida.text = if (userName.isBlank()) "Hola, estudiante" else "Hola, $userName"
         binding.tvInicialAvatar.text = userName.firstOrNull()?.uppercase() ?: "S"
+        loadAvatarPhoto()
+        binding.tvInicialAvatar.setOnClickListener { openProfile() }
+        binding.ivHomeAvatar.setOnClickListener { openProfile() }
         binding.tvUniversidad.text = university.ifBlank { "Universidad no especificada" }
         binding.tvCorreo.text = email
 
         val factory = AppViewModelFactory(application)
         studyViewModel = ViewModelProvider(this, factory)[StudyViewModel::class.java]
         booksViewModel = ViewModelProvider(this, factory)[BooksViewModel::class.java]
+        favoriteBooksViewModel = ViewModelProvider(this, factory)[FavoriteBooksViewModel::class.java]
 
         binding.rvSubjects.layoutManager =
             LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
@@ -78,7 +114,7 @@ class HomeActivity : AppCompatActivity() {
         subjectAdapter.submitList(subjects)
         renderSubjects()
         booksViewModel.state.observe(this) { state ->
-            bookAdapter.submitList(state.books.take(HOME_BOOK_LIMIT))
+            bookAdapter.submitList(state.books.take(HOME_BOOK_LIMIT), favoriteIds)
             binding.progressBooksHome.visibility =
                 if (state.isLoading) View.VISIBLE else View.GONE
             binding.rvHomeBooks.visibility =
@@ -94,6 +130,14 @@ class HomeActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, state.errorMessage, Snackbar.LENGTH_LONG).show()
             }
         }
+        favoriteBooksViewModel.state.observe(this) { state ->
+            favoriteIds = state.books.mapNotNull { it.id }.toSet()
+            bookAdapter.submitList(booksViewModel.state.value?.books.orEmpty().take(HOME_BOOK_LIMIT), favoriteIds)
+            state.message?.let {
+                Snackbar.make(binding.root, it, Snackbar.LENGTH_SHORT).show()
+                favoriteBooksViewModel.clearMessage()
+            }
+        }
         booksViewModel.loadSubjects(subjects)
 
         binding.tvVerTodo.setOnClickListener { showAddSubjectDialog() }
@@ -103,10 +147,11 @@ class HomeActivity : AppCompatActivity() {
         binding.tvVerBiblioteca.setOnClickListener { openLibrary() }
         binding.cardLibros.setOnClickListener { openLibrary() }
         binding.tvNavLibros.setOnClickListener { openLibrary() }
+        binding.tvNavFavorites.setOnClickListener { openFavorites() }
         binding.tvNavMaterias.setOnClickListener {
             binding.scrollHome.smoothScrollTo(0, binding.tvNumeroMaterias.top)
         }
-        binding.tvNavPerfil.setOnClickListener { showProfileDialog() }
+        binding.tvNavPerfil.setOnClickListener { openProfile() }
 
         studyViewModel.loadForUser(email)
         studyViewModel.state.observe(this) { state ->
@@ -127,6 +172,7 @@ class HomeActivity : AppCompatActivity() {
                 studyViewModel.clearMessage()
             }
             if (state.accountDeleted) {
+                AuthSessionStore(application).clear()
                 startActivity(
                     Intent(this, MainActivity::class.java).addFlags(
                         Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -208,6 +254,7 @@ class HomeActivity : AppCompatActivity() {
         }
         var dueAt = dueDate.timeInMillis
         dialogBinding.etFechaLimite.setText(formatDate(dueAt))
+        dialogBinding.etHoraLimite.setText(formatTime(dueAt))
         dialogBinding.etFechaLimite.setOnClickListener {
             DatePickerDialog(
                 this,
@@ -215,8 +262,6 @@ class HomeActivity : AppCompatActivity() {
                     dueDate.set(Calendar.YEAR, year)
                     dueDate.set(Calendar.MONTH, month)
                     dueDate.set(Calendar.DAY_OF_MONTH, day)
-                    dueDate.set(Calendar.HOUR_OF_DAY, 23)
-                    dueDate.set(Calendar.MINUTE, 59)
                     dueDate.set(Calendar.SECOND, 0)
                     dueDate.set(Calendar.MILLISECOND, 0)
                     dueAt = dueDate.timeInMillis
@@ -225,6 +270,22 @@ class HomeActivity : AppCompatActivity() {
                 dueDate.get(Calendar.YEAR),
                 dueDate.get(Calendar.MONTH),
                 dueDate.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }
+        dialogBinding.etHoraLimite.setOnClickListener {
+            TimePickerDialog(
+                this,
+                { _, hour, minute ->
+                    dueDate.set(Calendar.HOUR_OF_DAY, hour)
+                    dueDate.set(Calendar.MINUTE, minute)
+                    dueDate.set(Calendar.SECOND, 0)
+                    dueDate.set(Calendar.MILLISECOND, 0)
+                    dueAt = dueDate.timeInMillis
+                    dialogBinding.etHoraLimite.setText(formatTime(dueAt))
+                },
+                dueDate.get(Calendar.HOUR_OF_DAY),
+                dueDate.get(Calendar.MINUTE),
+                DateFormat.is24HourFormat(this)
             ).show()
         }
 
@@ -242,9 +303,13 @@ class HomeActivity : AppCompatActivity() {
                     dialogBinding.actvMateriaAsignacion.error = "Selecciona una materia."
                 } else if (title.isBlank()) {
                     dialogBinding.etTituloAsignacion.error = "Escribe el nombre de la asignación."
+                } else if (dueAt <= System.currentTimeMillis()) {
+                    Snackbar.make(binding.root, "Elige una fecha y hora futuras.", Snackbar.LENGTH_LONG).show()
                 } else {
-                    studyViewModel.addAssignment(subject, title, dueAt)
+                    val reminderEnabled = dialogBinding.cbRecordatorio.isChecked
+                    studyViewModel.addAssignment(subject, title, dueAt, reminderEnabled)
                     dialog.dismiss()
+                    if (reminderEnabled) binding.root.post { requestNotificationPermissionIfNeeded() }
                 }
             }
         }
@@ -272,8 +337,12 @@ class HomeActivity : AppCompatActivity() {
                 showAddAssignmentDialog()
                 true
             }
+            menu.add("Libros favoritos").setOnMenuItemClickListener {
+                openFavorites()
+                true
+            }
             menu.add("Mi perfil").setOnMenuItemClickListener {
-                showProfileDialog()
+                openProfile()
                 true
             }
             menu.add("Eliminar cuenta").setOnMenuItemClickListener {
@@ -288,13 +357,41 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun showProfileDialog() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(userName.ifBlank { "Mi perfil" })
-            .setMessage(university + "\n" + email)
-            .setNegativeButton("Eliminar cuenta") { _, _ -> confirmAccountDeletion() }
-            .setPositiveButton("Cerrar sesión") { _, _ -> confirmSignOut() }
-            .show()
+    private fun openProfile() {
+        val intent = Intent(this, ProfileActivity::class.java)
+            .putExtra(ProfileExtras.NAME, userName)
+            .putExtra(ProfileExtras.UNIVERSITY, university)
+            .putExtra(ProfileExtras.EMAIL, email)
+            .putStringArrayListExtra(ProfileExtras.SUBJECTS, ArrayList(subjects))
+        GoogleAuthSession.currentUser(this)
+            ?.takeIf { it.email.equals(email, ignoreCase = true) }
+            ?.let { firebaseUser ->
+                intent.putExtra(ProfileExtras.AUTH_PROVIDER, "google")
+                intent.putExtra(ProfileExtras.AUTH_UID, firebaseUser.uid)
+            }
+        startActivity(intent)
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun loadAvatarPhoto() {
+        val photo = getSharedPreferences("profile_photos", MODE_PRIVATE)
+            .getString(email.trim().lowercase(), null) ?: return
+        try {
+            binding.ivHomeAvatar.setImageURI(Uri.parse(photo))
+            binding.ivHomeAvatar.visibility = View.VISIBLE
+            binding.tvInicialAvatar.visibility = View.GONE
+        } catch (_: Exception) {
+            getSharedPreferences("profile_photos", MODE_PRIVATE).edit()
+                .remove(email.trim().lowercase()).apply()
+        }
     }
 
     private fun confirmSignOut() {
@@ -307,21 +404,53 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun returnToLogin() {
-        startActivity(
-            Intent(this, MainActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        AuthSessionStore(application).clear()
+        lifecycleScope.launch {
+            GoogleAuthSession.signOut(this@HomeActivity)
+            startActivity(
+                Intent(this@HomeActivity, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                )
             )
-        )
-        finish()
+            finish()
+        }
     }
 
     private fun confirmAccountDeletion() {
+        val firebaseUser = GoogleAuthSession.currentUser(this)
+            ?.takeIf { it.email.equals(email, ignoreCase = true) }
+        if (firebaseUser != null) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Eliminar cuenta de Google")
+                .setMessage("Se borrarán tu cuenta de Firebase, materias, asignaciones y libros favoritos. Esta acción no se puede deshacer.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Eliminar cuenta") { _, _ -> deleteGoogleAccount(firebaseUser) }
+                .show()
+            return
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle("Eliminar cuenta")
             .setMessage("Esta acción borrará tu cuenta, materias y asignaciones guardadas. Para confirmar, escribe tu contraseña.")
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("Continuar") { _, _ -> requestDeletePassword() }
             .show()
+    }
+
+    private fun deleteGoogleAccount(firebaseUser: FirebaseUser) {
+        lifecycleScope.launch {
+            try {
+                firebaseUser.delete().await()
+                studyViewModel.deleteGoogleAccount(firebaseUser.uid)
+            } catch (_: FirebaseAuthRecentLoginRequiredException) {
+                Snackbar.make(
+                    binding.root,
+                    "Por seguridad, cierra sesión e inicia con Google otra vez antes de eliminar la cuenta.",
+                    Snackbar.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {
+                Snackbar.make(binding.root, "Firebase no pudo eliminar la cuenta. Inténtalo de nuevo.", Snackbar.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun requestDeletePassword() {
@@ -354,11 +483,43 @@ class HomeActivity : AppCompatActivity() {
         startActivity(
             Intent(this, BooksActivity::class.java)
                 .putStringArrayListExtra(ProfileExtras.SUBJECTS, ArrayList(subjects))
+                .putExtra(ProfileExtras.EMAIL, email)
+        )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) loadAvatarPhoto()
+        if (::favoriteBooksViewModel.isInitialized && email.isNotBlank()) {
+            favoriteBooksViewModel.loadFavorites(email)
+        }
+    }
+
+    private fun openFavorites() {
+        startActivity(
+            Intent(this, FavoriteBooksActivity::class.java)
+                .putExtra(ProfileExtras.EMAIL, email)
+        )
+    }
+
+    private fun openBookDetails(book: com.example.basededatos.model.BookItem) {
+        val volumeId = book.id
+        if (volumeId.isNullOrBlank()) {
+            Snackbar.make(binding.root, "Este resultado no tiene una ficha disponible.", Snackbar.LENGTH_LONG).show()
+            return
+        }
+        startActivity(
+            Intent(this, BookDetailActivity::class.java)
+                .putExtra(BookDetailActivity.EXTRA_VOLUME_ID, volumeId)
+                .putExtra(ProfileExtras.EMAIL, email)
         )
     }
 
     private fun formatDate(timestamp: Long): String =
         SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(timestamp))
+
+    private fun formatTime(timestamp: Long): String =
+        DateFormat.getTimeFormat(this).format(Date(timestamp))
 
     private companion object {
         const val HOME_BOOK_LIMIT = 8

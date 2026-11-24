@@ -12,13 +12,17 @@ import com.example.basededatos.databinding.ItemBookHomeBinding
 import com.example.basededatos.model.BookItem
 
 class BookAdapter(
-    private val horizontalCards: Boolean = false
+    private val horizontalCards: Boolean = false,
+    private val onBookClick: (BookItem) -> Unit = {},
+    private val onFavoriteClick: (BookItem) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var books: List<BookItem> = emptyList()
+    private var favoriteBookIds: Set<String> = emptySet()
 
-    fun submitList(items: List<BookItem>) {
+    fun submitList(items: List<BookItem>, favorites: Set<String> = favoriteBookIds) {
         books = items
+        favoriteBookIds = favorites
         notifyDataSetChanged()
     }
 
@@ -47,8 +51,12 @@ class BookAdapter(
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (holder) {
-            is HomeBookViewHolder -> holder.bind(books[position])
-            is GridBookViewHolder -> holder.bind(books[position])
+            is HomeBookViewHolder -> holder.bind(
+                books[position], favoriteBookIds, onBookClick, onFavoriteClick
+            )
+            is GridBookViewHolder -> holder.bind(
+                books[position], favoriteBookIds, onBookClick, onFavoriteClick
+            )
         }
     }
 
@@ -57,29 +65,55 @@ class BookAdapter(
     private class HomeBookViewHolder(
         private val binding: ItemBookHomeBinding
     ) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(book: BookItem) = renderBook(
-            book,
-            binding.ivPortada,
-            binding.tvTitulo,
-            binding.tvAutor
-        )
+        fun bind(
+            book: BookItem,
+            favorites: Set<String>,
+            onBookClick: (BookItem) -> Unit,
+            onFavoriteClick: (BookItem) -> Unit
+        ) {
+            renderBook(book, binding.ivPortada, binding.tvTitulo, binding.tvAutor)
+            binding.root.setOnClickListener { onBookClick(book) }
+            renderFavorite(book, favorites, binding.btnFavoriteBook, onFavoriteClick)
+        }
     }
 
     private class GridBookViewHolder(
         private val binding: ItemBookBinding
     ) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(book: BookItem) = renderBook(
-            book,
-            binding.ivPortada,
-            binding.tvTitulo,
-            binding.tvAutor
-        )
+        fun bind(
+            book: BookItem,
+            favorites: Set<String>,
+            onBookClick: (BookItem) -> Unit,
+            onFavoriteClick: (BookItem) -> Unit
+        ) {
+            renderBook(book, binding.ivPortada, binding.tvTitulo, binding.tvAutor)
+            binding.root.setOnClickListener { onBookClick(book) }
+            renderFavorite(book, favorites, binding.btnFavoriteBook, onFavoriteClick)
+        }
     }
 
     private companion object {
         const val TYPE_GRID = 0
         const val TYPE_HOME = 1
     }
+}
+
+private fun renderFavorite(
+    book: BookItem,
+    favorites: Set<String>,
+    favoriteButton: android.widget.ImageButton,
+    onFavoriteClick: (BookItem) -> Unit
+) {
+    val isFavorite = book.id?.let(favorites::contains) == true
+    favoriteButton.setImageResource(
+        if (isFavorite) R.drawable.ic_favorite_filled else R.drawable.ic_favorite_outline
+    )
+    favoriteButton.contentDescription = if (isFavorite) {
+        "Quitar de favoritos"
+    } else {
+        "Agregar a favoritos"
+    }
+    favoriteButton.setOnClickListener { onFavoriteClick(book) }
 }
 
 private fun renderBook(

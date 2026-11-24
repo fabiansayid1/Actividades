@@ -2,7 +2,9 @@ package com.example.basededatos.view
 
 import android.graphics.Paint
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import android.text.format.DateFormat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.example.basededatos.R
@@ -60,9 +62,12 @@ class AssignmentAdapter(
             binding.tvFechaLimite.text = if (assignment.isCompleted) {
                 "Completada"
             } else {
-                "Entrega: " + SimpleDateFormat("EEE, d MMM", Locale.getDefault())
-                    .format(Date(assignment.dueAt))
+                "Entrega: " + SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault())
+                    .format(Date(assignment.dueAt)) + " · " +
+                    DateFormat.getTimeFormat(binding.root.context).format(Date(assignment.dueAt))
             }
+            binding.tvRecordatorioAsignacion.visibility =
+                if (!assignment.isCompleted && assignment.reminderEnabled) View.VISIBLE else View.GONE
             val dateColor = if (!assignment.isCompleted && assignment.dueAt < System.currentTimeMillis()) {
                 R.color.deadline_overdue
             } else {

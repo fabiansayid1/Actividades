@@ -5,4 +5,6 @@ object ProfileExtras {
     const val UNIVERSITY = "PROFILE_UNIVERSITY"
     const val EMAIL = "PROFILE_EMAIL"
     const val SUBJECTS = "PROFILE_SUBJECTS"
+    const val AUTH_PROVIDER = "PROFILE_AUTH_PROVIDER"
+    const val AUTH_UID = "PROFILE_AUTH_UID"
 }

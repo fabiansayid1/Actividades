@@ -61,8 +61,8 @@ class RegisterActivity : AppCompatActivity() {
             binding.progressRegistro.visibility = if (state.isLoading) View.VISIBLE else View.GONE
             binding.btnRegistrar.isEnabled = !state.isLoading
             state.errorMessage?.let { Snackbar.make(binding.root, it, Snackbar.LENGTH_LONG).show() }
-            state.profile?.let { profile ->
-                setResult(RESULT_OK, android.content.Intent().putProfile(profile))
+            state.registeredEmail?.let { email ->
+                setResult(RESULT_OK, android.content.Intent().putExtra(ProfileExtras.EMAIL, email))
                 finish()
             }
         }

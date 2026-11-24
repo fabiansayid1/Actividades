@@ -127,6 +127,18 @@
                         app:backgroundTint="@null"
                         app:cornerRadius="14dp" />
 
+
+                    <ImageButton
+                        android:id="@+id/btnGoogle"
+                        android:layout_width="35dp"
+                        android:layout_height="35dp"
+                        android:layout_marginTop="30dp"
+                        android:layout_marginBottom="20dp"
+                        android:background="@drawable/bg_button"
+                        android:padding="0dp"
+                        android:scaleType="centerInside"
+                        android:src="@drawable/google_logo" />
+
                     <ProgressBar
                         android:id="@+id/progressLogin"
                         android:layout_width="30dp"

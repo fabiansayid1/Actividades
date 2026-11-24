@@ -76,16 +76,36 @@
                         android:textSize="19sp"
                         android:textStyle="bold" />
 
-                    <TextView
-                        android:id="@+id/tvInicialAvatar"
+                    <FrameLayout
                         android:layout_width="42dp"
-                        android:layout_height="42dp"
-                        android:background="@drawable/bg_circle_avatar"
-                        android:gravity="center"
-                        android:text="S"
-                        android:textColor="@color/blue"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:layout_height="42dp">
+
+                        <TextView
+                            android:id="@+id/tvInicialAvatar"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/bg_circle_avatar"
+                            android:clickable="true"
+                            android:contentDescription="Abrir perfil"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:text="S"
+                            android:textColor="@color/white"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <ImageView
+                            android:id="@+id/ivHomeAvatar"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/bg_circle_avatar"
+                            android:clickable="true"
+                            android:clipToOutline="true"
+                            android:contentDescription="Abrir perfil"
+                            android:focusable="true"
+                            android:scaleType="centerCrop"
+                            android:visibility="gone" />
+                    </FrameLayout>
                 </LinearLayout>
 
                 <TextView
@@ -424,7 +444,17 @@
                 android:gravity="center"
                 android:text="▣&#10;Libros"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvNavFavorites"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="♡&#10;Favoritos"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/tvNavPerfil"
@@ -434,7 +464,7 @@
                 android:gravity="center"
                 android:text="◉&#10;Perfil"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

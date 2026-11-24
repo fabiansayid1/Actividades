@@ -19,9 +19,21 @@ class AppViewModelFactory(
             modelClass.isAssignableFrom(UniversitySearchViewModel::class.java) ->
                 UniversitySearchViewModel(RetrofitClient.universityApi) as T
             modelClass.isAssignableFrom(BooksViewModel::class.java) ->
-                BooksViewModel(RetrofitClient.booksApi, BuildConfig.GOOGLE_BOOKS_API_KEY) as T
+                BooksViewModel(
+                    RetrofitClient.booksApi,
+                    BuildConfig.GOOGLE_BOOKS_API_KEY,
+                    UserStore(application)
+                ) as T
+            modelClass.isAssignableFrom(BookDetailViewModel::class.java) ->
+                BookDetailViewModel(
+                    RetrofitClient.booksApi,
+                    BuildConfig.GOOGLE_BOOKS_API_KEY,
+                    UserStore(application)
+                ) as T
+            modelClass.isAssignableFrom(FavoriteBooksViewModel::class.java) ->
+                FavoriteBooksViewModel(UserStore(application)) as T
             modelClass.isAssignableFrom(StudyViewModel::class.java) ->
-                StudyViewModel(UserStore(application)) as T
+                StudyViewModel(application, UserStore(application)) as T
             else -> throw IllegalArgumentException("ViewModel no soportado: " + modelClass.name)
         }
     }

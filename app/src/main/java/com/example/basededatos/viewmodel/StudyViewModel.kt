@@ -1,5 +1,6 @@
 package com.example.basededatos.viewmodel
 
+import android.app.Application
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -7,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.basededatos.network.AssignmentRecord
 import com.example.basededatos.network.StudyData
 import com.example.basededatos.network.UserStore
+import com.example.basededatos.network.AssignmentReminderScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -19,6 +21,7 @@ data class StudyUiState(
 )
 
 class StudyViewModel(
+    private val application: Application,
     private val userStore: UserStore
 ) : ViewModel() {
 
@@ -32,7 +35,9 @@ class StudyViewModel(
         viewModelScope.launch {
             _state.value = _state.value?.copy(isLoading = true, message = null)
             try {
-                publish(userStore.getStudyData(account))
+                val data = userStore.getStudyData(account)
+                syncReminders(data.assignments)
+                publish(data)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -58,11 +63,33 @@ class StudyViewModel(
         userStore.removeSubject(email, subject)
     }
 
-    fun addAssignment(subject: String, title: String, dueAt: Long) = updateStudy(
-        successMessage = "Asignación guardada.",
-        failureMessage = "No se pudo guardar la asignación."
-    ) { email ->
-        userStore.addAssignment(email, subject, title, dueAt)
+    fun addAssignment(subject: String, title: String, dueAt: Long, reminderEnabled: Boolean) {
+        val account = currentEmail ?: return
+        viewModelScope.launch {
+            _state.value = _state.value?.copy(isLoading = true, message = null)
+            try {
+                val assignmentId = userStore.addAssignment(
+                    account,
+                    subject,
+                    title,
+                    dueAt,
+                    reminderEnabled
+                )
+                val data = userStore.getStudyData(account)
+                syncReminders(data.assignments)
+                publish(
+                    data,
+                    if (assignmentId > 0L) "Asignación guardada." else "No se pudo guardar la asignación."
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _state.value = _state.value?.copy(
+                    isLoading = false,
+                    message = "No se pudo guardar la asignación."
+                )
+            }
+        }
     }
 
     fun setAssignmentCompleted(assignment: AssignmentRecord, completed: Boolean) =
@@ -87,6 +114,7 @@ class StudyViewModel(
             try {
                 val deleted = userStore.deleteAccount(account, password)
                 if (deleted) {
+                    syncReminders(emptyList())
                     _state.value = StudyUiState(accountDeleted = true)
                 } else {
                     _state.value = _state.value?.copy(
@@ -100,6 +128,34 @@ class StudyViewModel(
                 _state.value = _state.value?.copy(
                     isLoading = false,
                     message = "No se pudo eliminar la cuenta. Inténtalo de nuevo."
+                )
+            }
+        }
+    }
+
+    fun deleteGoogleAccount(googleUid: String) {
+        val account = currentEmail ?: return
+        viewModelScope.launch {
+            _state.value = _state.value?.copy(isLoading = true, message = null)
+            try {
+                val deleted = userStore.deleteGoogleAccount(account, googleUid)
+                if (deleted) {
+                    syncReminders(emptyList())
+                    application.getSharedPreferences("profile_photos", Application.MODE_PRIVATE)
+                        .edit().remove(account).apply()
+                    _state.value = StudyUiState(accountDeleted = true)
+                } else {
+                    _state.value = _state.value?.copy(
+                        isLoading = false,
+                        message = "No se pudo eliminar el perfil local vinculado a Google."
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _state.value = _state.value?.copy(
+                    isLoading = false,
+                    message = "No se pudo eliminar la cuenta de Google. Inténtalo de nuevo."
                 )
             }
         }
@@ -120,6 +176,7 @@ class StudyViewModel(
             try {
                 val success = action(account)
                 val data = userStore.getStudyData(account)
+                syncReminders(data.assignments)
                 publish(data, if (success) successMessage else failureMessage)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -138,5 +195,25 @@ class StudyViewModel(
             assignments = data.assignments,
             message = message
         )
+    }
+
+    private fun syncReminders(assignments: List<AssignmentRecord>) {
+        val previous = _state.value?.assignments.orEmpty()
+        val currentIds = assignments.map { it.id }.toSet()
+        previous.filterNot { it.id in currentIds }.forEach { assignment ->
+            AssignmentReminderScheduler.cancel(application, currentEmail.orEmpty(), assignment.id)
+        }
+        assignments.forEach { assignment ->
+            if (assignment.isCompleted || !assignment.reminderEnabled) {
+                AssignmentReminderScheduler.cancel(application, currentEmail.orEmpty(), assignment.id)
+            } else {
+                AssignmentReminderScheduler.schedule(
+                    application,
+                    currentEmail.orEmpty(),
+                    assignment.id,
+                    assignment.dueAt
+                )
+            }
+        }
     }
 }

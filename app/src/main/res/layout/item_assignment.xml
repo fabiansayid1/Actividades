@@ -61,6 +61,16 @@
                 android:layout_marginTop="2dp"
                 android:textColor="@color/muted"
                 android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvRecordatorioAsignacion"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Recordatorio activo"
+                android:textColor="@color/blue_dark"
+                android:textSize="10sp"
+                android:visibility="gone" />
         </LinearLayout>
 
         <TextView

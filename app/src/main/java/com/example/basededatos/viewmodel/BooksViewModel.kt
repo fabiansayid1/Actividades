@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.basededatos.model.BookItem
 import com.example.basededatos.network.BooksApi
+import com.example.basededatos.network.UserStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -26,14 +28,22 @@ data class BooksUiState(
     val errorMessage: String? = null
 )
 
+enum class BookSearchMode(val apiOperator: String, val label: String) {
+    TITLE("intitle", "Título"),
+    AUTHOR("inauthor", "Autor"),
+    SUBJECT("subject", "Materia")
+}
+
 private data class BookRequestResult(
+    val query: String,
     val books: List<BookItem>,
     val error: Exception? = null
 )
 
 class BooksViewModel(
     private val booksApi: BooksApi,
-    private val googleBooksApiKey: String
+    private val googleBooksApiKey: String,
+    private val userStore: UserStore
 ) : ViewModel() {
 
     private val _state = MutableLiveData(BooksUiState())
@@ -69,22 +79,33 @@ class BooksViewModel(
                                     maxResults = 10,
                                     apiKey = googleBooksApiKey.takeIf { it.isNotBlank() }
                                 )
-                                BookRequestResult(response.items.orEmpty())
+                                BookRequestResult(subject, response.items.orEmpty())
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (error: Exception) {
-                                BookRequestResult(emptyList(), error)
+                                BookRequestResult(subject, emptyList(), error)
                             }
                         }
                     }.awaitAll()
                 }
 
-                val books = results.flatMap { it.books }
+                val apiBooks = results.flatMap { it.books }
                     .distinctBy { it.id ?: it.volumeInfo?.title.orEmpty() }
+                results.filter { it.books.isNotEmpty() }
+                    .forEach { result -> userStore.cacheApiBooks(listOf(result.query to result.books)) }
+                val cachedBooks = if (apiBooks.isEmpty()) {
+                    userStore.getCachedApiBooks(normalized)
+                } else emptyList()
+                val books = apiBooks.ifEmpty { cachedBooks }
                 val errors = results.mapNotNull { it.error }
                 val errorMessage = when {
+                    errors.isEmpty() && apiBooks.isNotEmpty() -> null
+                    errors.isNotEmpty() && cachedBooks.isNotEmpty() ->
+                        "Sin conexión con Google Books. Se muestran resultados guardados."
+                    errors.isEmpty() && apiBooks.isEmpty() && cachedBooks.isNotEmpty() ->
+                        "Se muestran los últimos resultados guardados."
                     errors.isEmpty() -> null
-                    books.isNotEmpty() -> "Algunas materias no pudieron cargar sus libros."
+                    errors.isNotEmpty() && apiBooks.isNotEmpty() -> "Algunas materias no pudieron cargar sus libros."
                     else -> describeRequestFailure(errors.first())
                 }
                 _state.value = BooksUiState(
@@ -98,6 +119,51 @@ class BooksViewModel(
                 _state.value = BooksUiState(
                     isEmpty = true,
                     errorMessage = describeRequestFailure(error)
+                )
+            }
+        }
+    }
+
+    fun searchBooks(query: String, mode: BookSearchMode) {
+        val term = query.trim()
+        if (term.isEmpty()) return
+
+        loadedSubjects = emptyList()
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _state.value = BooksUiState(isLoading = true)
+            val apiQuery = "${mode.apiOperator}:$term"
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    booksApi.getBooks(
+                        query = apiQuery,
+                        maxResults = 20,
+                        apiKey = googleBooksApiKey.takeIf { it.isNotBlank() }
+                    )
+                }
+                val apiBooks = response.items.orEmpty()
+                if (apiBooks.isNotEmpty()) userStore.cacheApiBooks(listOf(apiQuery to apiBooks))
+                val cachedBooks = if (apiBooks.isEmpty()) {
+                    userStore.getCachedApiBooks(listOf(apiQuery))
+                } else emptyList()
+                val books = apiBooks.ifEmpty { cachedBooks }
+                _state.value = BooksUiState(
+                    books = books,
+                    isEmpty = books.isEmpty(),
+                    errorMessage = if (apiBooks.isEmpty() && cachedBooks.isNotEmpty()) {
+                        "Se muestran los últimos resultados guardados."
+                    } else null
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val cachedBooks = userStore.getCachedApiBooks(listOf(apiQuery))
+                _state.value = BooksUiState(
+                    books = cachedBooks,
+                    isEmpty = cachedBooks.isEmpty(),
+                    errorMessage = if (cachedBooks.isNotEmpty()) {
+                        "Sin conexión con Google Books. Se muestran resultados guardados."
+                    } else describeRequestFailure(error)
                 )
             }
         }
