@@ -10,8 +10,14 @@ import android.os.Build
 import android.os.Bundle
 import android.text.format.DateFormat
 import android.view.View
+import android.view.Gravity
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.app.Dialog
+import android.view.WindowManager
 import android.widget.ArrayAdapter
-import android.widget.PopupMenu
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,6 +88,7 @@ class HomeActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityHomeBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        requestFavoriteNotificationPermission()
 
         userName = intent.getStringExtra(ProfileExtras.NAME).orEmpty()
         university = intent.getStringExtra(ProfileExtras.UNIVERSITY).orEmpty()
@@ -134,6 +141,9 @@ class HomeActivity : AppCompatActivity() {
             favoriteIds = state.books.mapNotNull { it.id }.toSet()
             bookAdapter.submitList(booksViewModel.state.value?.books.orEmpty().take(HOME_BOOK_LIMIT), favoriteIds)
             state.message?.let {
+                if (it.contains("se agregó a favoritos", ignoreCase = true)) {
+                    FavoriteNotificationHelper.show(this, it.substringBefore(" se agregó a favoritos"))
+                }
                 Snackbar.make(binding.root, it, Snackbar.LENGTH_SHORT).show()
                 favoriteBooksViewModel.clearMessage()
             }
@@ -328,33 +338,119 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun showHomeMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            menu.add("Agregar materia").setOnMenuItemClickListener {
-                showAddSubjectDialog()
-                true
+        val dialog = Dialog(this)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(28), dp(16), dp(20))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadii = floatArrayOf(0f, 0f, dp(22).toFloat(), dp(22).toFloat(),
+                    dp(22).toFloat(), dp(22).toFloat(), 0f, 0f)
             }
-            menu.add("Nueva asignación").setOnMenuItemClickListener {
-                showAddAssignmentDialog()
-                true
-            }
-            menu.add("Libros favoritos").setOnMenuItemClickListener {
-                openFavorites()
-                true
-            }
-            menu.add("Mi perfil").setOnMenuItemClickListener {
-                openProfile()
-                true
-            }
-            menu.add("Eliminar cuenta").setOnMenuItemClickListener {
-                confirmAccountDeletion()
-                true
-            }
-            menu.add("Cerrar sesión").setOnMenuItemClickListener {
-                confirmSignOut()
-                true
-            }
-            show()
         }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(20), dp(16), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.rgb(20, 91, 190), Color.rgb(70, 132, 224))
+            ).apply { cornerRadius = dp(18).toFloat() }
+        }
+        header.addView(TextView(this).apply {
+            text = "STUDY PULSE"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        })
+        header.addView(TextView(this).apply {
+            text = if (userName.isBlank()) "Tu espacio de aprendizaje" else "Hola, $userName"
+            setTextColor(Color.rgb(232, 241, 255))
+            textSize = 13f
+            setPadding(0, dp(6), 0, 0)
+        })
+        panel.addView(header, LinearLayout.LayoutParams(-1, -2))
+
+        panel.addView(TextView(this).apply {
+            text = "MENÚ PRINCIPAL"
+            setTextColor(Color.rgb(130, 143, 162))
+            textSize = 11f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.08f
+            setPadding(dp(10), dp(24), 0, dp(10))
+        })
+
+        fun addItem(icon: String, label: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), 0, dp(8), 0)
+                background = selectableBackground()
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    action()
+                }
+            }
+            row.addView(TextView(this).apply {
+                text = icon
+                textSize = 19f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(36, 94, 174))
+            }, LinearLayout.LayoutParams(dp(38), dp(52)))
+            row.addView(TextView(this).apply {
+                text = label
+                textSize = 15f
+                setTextColor(Color.rgb(43, 54, 72))
+                gravity = Gravity.CENTER_VERTICAL
+            }, LinearLayout.LayoutParams(0, dp(52), 1f))
+            panel.addView(row, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+
+        addItem("⌂", "Inicio") { binding.scrollHome.smoothScrollTo(0, 0) }
+        addItem("▤", "Mis materias") {
+            binding.scrollHome.smoothScrollTo(0, binding.tvNumeroMaterias.top)
+        }
+        addItem("✓", "Asignaciones") {
+            binding.scrollHome.smoothScrollTo(0, binding.tvPendingCount.top)
+        }
+        addItem("▣", "Biblioteca de libros") { openLibrary() }
+        addItem("♡", "Libros favoritos") { openFavorites() }
+        addItem("◉", "Mi perfil") { openProfile() }
+
+        panel.addView(View(this).apply {
+            setBackgroundColor(Color.rgb(232, 237, 245))
+        }, LinearLayout.LayoutParams(-1, dp(1)).apply {
+            topMargin = dp(14)
+            bottomMargin = dp(10)
+        })
+        addItem("＋", "Agregar materia") { showAddSubjectDialog() }
+        addItem("＋", "Nueva asignación") { showAddAssignmentDialog() }
+        addItem("⚙", "Eliminar cuenta") { confirmAccountDeletion() }
+        addItem("↪", "Cerrar sesión") { confirmSignOut() }
+
+        dialog.setContentView(panel)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setLayout(dp(310), WindowManager.LayoutParams.MATCH_PARENT)
+            setGravity(Gravity.START or Gravity.CENTER_VERTICAL)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.48f)
+        }
+        dialog.show()
+        dialog.window?.setLayout(dp(310), WindowManager.LayoutParams.MATCH_PARENT)
+        dialog.window?.setGravity(Gravity.START or Gravity.CENTER_VERTICAL)
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
+    private fun selectableBackground(): android.graphics.drawable.Drawable {
+        val value = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true)
+        return if (value.resourceId != 0) getDrawable(value.resourceId)!!
+        else GradientDrawable().apply { setColor(Color.TRANSPARENT) }
     }
 
     private fun openProfile() {
@@ -523,5 +619,15 @@ class HomeActivity : AppCompatActivity() {
 
     private companion object {
         const val HOME_BOOK_LIMIT = 8
+    }
+
+    private fun requestFavoriteNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4102)
+        }
     }
 }

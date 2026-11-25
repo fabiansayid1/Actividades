@@ -33,9 +33,14 @@ class BooksActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityBooksBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        requestFavoriteNotificationPermission()
 
         binding.btnVolver.setOnClickListener { finish() }
         binding.btnBuscarLibros.setOnClickListener { searchBooks() }
+        binding.btnConsultarBd.setOnClickListener {
+            binding.tvMateriasBuscadas.text = "Consulta local: elementos almacenados en SQLite"
+            booksViewModel.loadStoredApiBooks()
+        }
 
         booksViewModel = ViewModelProvider(
             this,
@@ -66,6 +71,9 @@ class BooksActivity : AppCompatActivity() {
             favoriteIds = state.books.mapNotNull { it.id }.toSet()
             refreshBookCards()
             state.message?.let {
+                if (it.contains("se agregó a favoritos", ignoreCase = true)) {
+                    FavoriteNotificationHelper.show(this, it.substringBefore(" se agregó a favoritos"))
+                }
                 Snackbar.make(binding.root, it, Snackbar.LENGTH_SHORT).show()
                 favoriteBooksViewModel.clearMessage()
             }
@@ -117,5 +125,15 @@ class BooksActivity : AppCompatActivity() {
 
     private fun refreshBookCards() {
         if (::binding.isInitialized) bookAdapter.submitList(visibleBooks, favoriteIds)
+    }
+
+    private fun requestFavoriteNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4102)
+        }
     }
 }

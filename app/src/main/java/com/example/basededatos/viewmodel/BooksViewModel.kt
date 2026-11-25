@@ -124,6 +124,28 @@ class BooksViewModel(
         }
     }
 
+    fun loadStoredApiBooks() {
+        loadedSubjects = emptyList()
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _state.value = BooksUiState(isLoading = true)
+            try {
+                val stored = withContext(Dispatchers.IO) { userStore.getStoredApiBooks() }
+                val books = stored.map { it.book }
+                _state.value = BooksUiState(
+                    books = books,
+                    isEmpty = books.isEmpty(),
+                    errorMessage = if (books.isEmpty()) "Todavía no hay elementos guardados en la base de datos." else null
+                )
+            } catch (error: Exception) {
+                _state.value = BooksUiState(
+                    isEmpty = true,
+                    errorMessage = "No fue posible consultar los elementos guardados: ${error.localizedMessage.orEmpty()}"
+                )
+            }
+        }
+    }
+
     fun searchBooks(query: String, mode: BookSearchMode) {
         val term = query.trim()
         if (term.isEmpty()) return

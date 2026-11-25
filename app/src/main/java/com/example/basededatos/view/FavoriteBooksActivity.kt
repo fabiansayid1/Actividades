@@ -28,6 +28,7 @@ class FavoriteBooksActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityFavoriteBooksBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        requestFavoriteNotificationPermission()
         email = intent.getStringExtra(ProfileExtras.EMAIL).orEmpty()
         binding.btnBackFavorites.setOnClickListener { finish() }
         binding.rvFavoriteBooks.layoutManager = GridLayoutManager(this, 2)
@@ -45,6 +46,9 @@ class FavoriteBooksActivity : AppCompatActivity() {
             binding.tvFavoritesEmpty.visibility =
                 if (!state.isLoading && state.books.isEmpty()) View.VISIBLE else View.GONE
             state.message?.let {
+                if (it.contains("se agregó a favoritos", ignoreCase = true)) {
+                    FavoriteNotificationHelper.show(this, it.substringBefore(" se agregó a favoritos"))
+                }
                 Snackbar.make(binding.rootFavorites, it, Snackbar.LENGTH_SHORT).show()
                 viewModel.clearMessage()
             }
@@ -67,5 +71,15 @@ class FavoriteBooksActivity : AppCompatActivity() {
                 .putExtra(BookDetailActivity.EXTRA_VOLUME_ID, volumeId)
                 .putExtra(ProfileExtras.EMAIL, email)
         )
+    }
+
+    private fun requestFavoriteNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4102)
+        }
     }
 }

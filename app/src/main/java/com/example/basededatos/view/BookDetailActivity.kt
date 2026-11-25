@@ -4,6 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.graphics.Color
+import android.view.ViewGroup
+import android.widget.TextView
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.text.HtmlCompat
@@ -18,7 +25,7 @@ import com.example.basededatos.viewmodel.FavoriteBooksViewModel
 import com.google.android.material.snackbar.Snackbar
 import java.util.Locale
 
-class BookDetailActivity : AppCompatActivity() {
+class BookDetailActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var binding: ActivityBookDetailBinding
     private lateinit var viewModel: BookDetailViewModel
@@ -27,11 +34,26 @@ class BookDetailActivity : AppCompatActivity() {
     private var currentBook: BookItem? = null
     private var favoriteIds: Set<String> = emptySet()
     private var readerUrl: String? = null
+    private lateinit var sensorManager: SensorManager
+    private var lightSensor: Sensor? = null
+    private var darkModeActive = false
+    private var lightModeLabel: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityBookDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        requestFavoriteNotificationPermission()
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
+        lightModeLabel = TextView(this).apply {
+            textSize = 12f
+            setPadding(12, 8, 12, 8)
+            text = if (lightSensor == null) "Sensor de luz no disponible" else "Modo automático según la luz ambiental"
+        }
+        (binding.scrollBookDetail.getChildAt(0) as? android.widget.LinearLayout)
+            ?.addView(lightModeLabel, 1)
+        applyLightTheme(false)
         binding.btnBackDetail.setOnClickListener { finish() }
         binding.btnOpenBookReader.setOnClickListener { openReader() }
         binding.btnFavoriteDetail.setOnClickListener {
@@ -59,6 +81,9 @@ class BookDetailActivity : AppCompatActivity() {
             favoriteIds = state.books.mapNotNull { it.id }.toSet()
             renderFavoriteButton()
             state.message?.let {
+                if (it.contains("se agregó a favoritos", ignoreCase = true)) {
+                    FavoriteNotificationHelper.show(this, it.substringBefore(" se agregó a favoritos"))
+                }
                 Snackbar.make(binding.root, it, Snackbar.LENGTH_SHORT).show()
                 favoriteBooksViewModel.clearMessage()
             }
@@ -66,6 +91,53 @@ class BookDetailActivity : AppCompatActivity() {
 
         favoriteBooksViewModel.loadFavorites(email)
         viewModel.loadBook(intent.getStringExtra(EXTRA_VOLUME_ID).orEmpty())
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lightSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+    }
+
+    override fun onPause() {
+        sensorManager.unregisterListener(this)
+        super.onPause()
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        val lux = event?.values?.firstOrNull() ?: return
+        // Umbral didáctico: debajo de 20 lux se activa el tema oscuro.
+        val shouldUseDark = lux < 20f
+        if (shouldUseDark != darkModeActive) applyLightTheme(shouldUseDark)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun applyLightTheme(dark: Boolean) {
+        darkModeActive = dark
+        val background = if (dark) Color.rgb(24, 29, 39) else Color.rgb(245, 247, 251)
+        val primaryText = if (dark) Color.WHITE else Color.rgb(30, 30, 30)
+        val secondaryText = if (dark) Color.rgb(205, 213, 225) else Color.rgb(102, 112, 133)
+        binding.root.setBackgroundColor(background)
+        fun tint(view: android.view.View) {
+            if (view is com.google.android.material.card.MaterialCardView) {
+                view.setCardBackgroundColor(if (dark) Color.rgb(35, 42, 55) else Color.WHITE)
+            }
+            when (view) {
+                is TextView -> {
+                    val current = view.currentTextColor
+                    // Mantiene los colores de acción (azul/rojo) y adapta texto neutro.
+                    if (current == Color.BLACK || current == Color.rgb(30, 30, 30) ||
+                        current == Color.rgb(102, 112, 133) || current == Color.DKGRAY
+                    ) view.setTextColor(if (view.textSize >= 20f) primaryText else secondaryText)
+                }
+                is ViewGroup -> for (i in 0 until view.childCount) tint(view.getChildAt(i))
+            }
+        }
+        tint(binding.root)
+        lightModeLabel?.apply {
+            text = if (dark) "Modo oscuro automático · poca luz detectada" else "Modo claro automático · luz suficiente"
+            setTextColor(secondaryText)
+        }
     }
 
     private fun renderBook(book: BookItem) {
@@ -166,5 +238,15 @@ class BookDetailActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_VOLUME_ID = "book_volume_id"
+    }
+
+    private fun requestFavoriteNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4102)
+        }
     }
 }

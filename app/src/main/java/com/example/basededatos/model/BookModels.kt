@@ -65,3 +65,22 @@ data class BookSaleInfo(
     @SerializedName("saleability") val saleability: String?,
     @SerializedName("isEbook") val isEbook: Boolean?
 )
+
+
+/**
+ * Representa una fila almacenada en la tabla api_books de SQLite.
+ * Conserva los campos consultables y el objeto completo que llegó desde Google Books.
+ */
+data class StoredApiBook(
+    val volumeId: String,
+    val title: String,
+    val authors: String,
+    val description: String?,
+    val thumbnailUrl: String?,
+    val previewLink: String?,
+    val infoLink: String?,
+    val language: String?,
+    val searchQueries: List<String>,
+    val cachedAt: Long,
+    val book: BookItem
+)

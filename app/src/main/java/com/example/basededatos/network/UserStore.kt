@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.example.basededatos.model.BookItem
 import com.example.basededatos.model.ImageLinks
+import com.example.basededatos.model.StoredApiBook
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -487,6 +488,52 @@ class UserStore(context: Context) :
             }
         }
         cachedBooks.distinctBy { it.id }
+    }
+
+    /**
+     * Consulta todos los elementos de Google Books guardados en SQLite.
+     * Devuelve un modelo tipado para que la interfaz no dependa directamente del cursor.
+     */
+    suspend fun getStoredApiBooks(): List<StoredApiBook> = withContext(Dispatchers.IO) {
+        val records = mutableListOf<StoredApiBook>()
+        readableDatabase.query(
+            TABLE_API_BOOKS,
+            arrayOf(
+                COLUMN_API_VOLUME_ID,
+                COLUMN_API_TITLE,
+                COLUMN_API_AUTHORS,
+                COLUMN_API_DESCRIPTION,
+                COLUMN_API_THUMBNAIL,
+                COLUMN_API_PREVIEW_LINK,
+                COLUMN_API_INFO_LINK,
+                COLUMN_API_LANGUAGE,
+                COLUMN_API_QUERIES,
+                COLUMN_API_CACHED_AT,
+                COLUMN_API_BOOK_JSON
+            ),
+            null, null, null, null,
+            "$COLUMN_API_CACHED_AT DESC"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val book = runCatching {
+                    gson.fromJson(cursor.getString(10), BookItem::class.java)
+                }.getOrNull() ?: continue
+                records += StoredApiBook(
+                    volumeId = cursor.getString(0),
+                    title = cursor.getString(1).orEmpty(),
+                    authors = cursor.getString(2).orEmpty(),
+                    description = cursor.getString(3),
+                    thumbnailUrl = cursor.getString(4),
+                    previewLink = cursor.getString(5),
+                    infoLink = cursor.getString(6),
+                    language = cursor.getString(7),
+                    searchQueries = cursor.getString(8).orEmpty().toQueryList(),
+                    cachedAt = cursor.getLong(9),
+                    book = book
+                )
+            }
+        }
+        records
     }
 
     suspend fun getCachedApiBook(volumeId: String): BookItem? = withContext(Dispatchers.IO) {

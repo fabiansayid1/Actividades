@@ -114,6 +114,15 @@
     </com.google.android.material.button.MaterialButtonToggleGroup>
 
     <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnConsultarBd"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Consultar elementos guardados en BD"
+        android:textAllCaps="false" />
+
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnBuscarLibros"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
